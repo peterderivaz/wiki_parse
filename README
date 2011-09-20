@@ -1,0 +1,6 @@
+Author: 
+Peter de Rivaz
+
+Purpose:
+A learning exercise for me to get to play with Python/github/graph theory/scaling programs to big data sets.
+In development, currently only includes a minimal parser for the sql link graph for wikipedia files pagelinks.sql and page.sql
