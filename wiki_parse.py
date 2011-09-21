@@ -1,8 +1,13 @@
 # Copyright 2011 Peter de Rivaz
 # Trying to parse a wikipedia database file for fun
 # Downloaded from http://dumps.wikimedia.org/
-import re,time,gzip
+#
+# Took 2400 seconds to find 30million links in english wikipedia
+# Reduces 19Gig to 1.2Gig of arrays (uses 2gig of RAM in the process, this could change to be streaming)
+
+import re,time,gzip,cPickle,os
 from collections import defaultdict
+from array import array
 
 compressed=True
 base='c:/data/wikipedia/'
@@ -10,6 +15,8 @@ base='c:/data/wikipedia/'
 wiki=base+'enwiki-20110901'
 pagelinks_sql=wiki+'-pagelinks.sql'
 page_sql=wiki+'-page.sql'
+outname=wiki+'.pql'
+outname2=wiki+'links.raw'
 myopen=open
 if compressed:
     pagelinks_sql+='.gz'
@@ -82,16 +89,95 @@ def parse_page(page_sql):
     fd.close()
     return title2key,key2title
 
-t0=time.time()
-title2key,key2title=parse_page(page_sql)
-print 'Found %d pages' % len(title2key)
-print time.time()-t0
-D=defaultdict(int)
-def action(pg_from,pg_to):
-    D[pg_to]+=1  
-parse_links(pagelinks_sql,title2key,action)
-P=sorted(D.items(),key=lambda (k,c) :c,reverse=True)
-for key,c in P: 
-    print key2title[key],c
-print time.time()-t0
+def extract_links():
+    """Parses the page and pagelinks sql.gz files to produce a .pql and .raw file.
+    The .pql contains a pickled dictionary of key->title
+    The .raw file contains 32bit quantities
+        num keys
+        num links
+        num keys*key->offset1
+        num_keys*offset1->offset2
+        num_links*links
+        """
+    global last
+    t0=time.time()
+    title2key,key2title=parse_page(page_sql)
+    print 'Found %d pages' % len(title2key)
+    print time.time()-t0
+    print 'Pickling'
+    out=open(outname,'wb')
+    cPickle.dump(key2title,out,2)
+    out.close()
+    print time.time()-t0
+    print 'Pickled'
+    D=defaultdict(list)
+    def actionD(pg_from,pg_to):
+        D[pg_from].append(pg_to)
+    L=array('i')
+    Akeys=array('i')
+    Aoffsets=array('i')
+    Alinks=array('i')
+    last=-1
+    def action(pg_from,pg_to):
+        global last
+        if pg_from!=last:
+            Akeys.append(pg_from)
+            Aoffsets.append(len(Alinks))
+            last=pg_from
+        Alinks.append(pg_to)
+    parse_links(pagelinks_sql,title2key,action)
+    print time.time()-t0
+    print 'Saving'
+    out2=open(outname2,'wb')
+    #cPickle.dump(D,out2,2)
+    L.append(len(Aoffsets))
+    L.append(len(Alinks))
+    L.tofile(out2)
+    Akeys.tofile(out2)
+    Aoffsets.tofile(out2)
+    Alinks.tofile(out2)
+    out2.close()
+    print time.time()-t0
+
+def load_pages():
+    """Loads the key->title pickled file"""
+    t0=time.time()
+    out=open(outname,'rb')
+    key2title=cPickle.load(out)
+    out.close()
+    print 'Loaded key->title in ',time.time()-t0
+    return key2title
+
+def load_links():
+    """Loads the arrays in the .raw file produced by extract_links
+    The .raw file contains 32bit quantities
+        num keys
+        num links
+        num keys*key->offset1
+        num_keys*offset1->offset2
+        num_links*links
+        """
+    t0=time.time()
+    print 'Loading database file (may take a few seconds)'
+    L=array('i')
+    Akeys=array('i')
+    Aoffsets=array('i')
+    Alinks=array('i')
+    out2=open(outname2,'rb')
+    L.fromfile(out2,2)
+    Akeys.fromfile(out2,L[0])
+    Aoffsets.fromfile(out2,L[0])
+    Alinks.fromfile(out2,L[1])
+    out2.close()
+    print  'Loaded link database in ',time.time()-t0
+    return Akeys,Aoffsets,Alinks
+
+# We only convert the file the first time
+if not os.path.exists(outname2):
+    print "Converting database file, estimated time 10 minutes per gigabyte of compressed database file"
+    extract_links() 
+database=load_links()
+Akeys,Aoffsets,Alinks=database
+
+
 #fd.close()
