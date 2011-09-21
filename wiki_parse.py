@@ -2,7 +2,7 @@
 # Trying to parse a wikipedia database file for fun
 # Downloaded from http://dumps.wikimedia.org/
 #
-# Took 2400 seconds to find 30million links in english wikipedia
+# Took 2400 seconds to find 284 million links in english wikipedia
 # Reduces 19Gig to 1.2Gig of arrays (uses 2gig of RAM in the process, this could change to be streaming)
 
 import re,time,gzip,cPickle,os
@@ -172,6 +172,22 @@ def load_links():
     print  'Loaded link database in ',time.time()-t0
     return Akeys,Aoffsets,Alinks
 
+def toplinks(database,top=100):
+    """Returns a generator for page ids with more than N outward links"""
+    Akeys,Aoffsets,Alinks=database
+    for i,start in enumerate(Aoffsets[:-1]):
+        x=Aoffsets[i+1]-start
+        if x>=top:
+            yield Akeys[i],x
+    
+def makekey2id(database):
+    """Returns a generator for page ids with more than N outward links"""
+    Akeys,Aoffsets,Alinks=database
+    D={}
+    for i,key in enumerate(Akeys):
+        D[key]=i
+    return D
+            
 # We only convert the file the first time
 if not os.path.exists(outname2):
     print "Converting database file, estimated time 10 minutes per gigabyte of compressed database file"
@@ -179,5 +195,67 @@ if not os.path.exists(outname2):
 database=load_links()
 Akeys,Aoffsets,Alinks=database
 
+key2id=makekey2id(database)
 
+key2title=load_pages()
+for key,x in toplinks(database,2000):
+    try:
+        print key,key2title[key],x
+    except KeyError:
+        pass
 #fd.close()
+
+def viewlinks(key):
+    i=key2id[key]
+    for off in xrange(Aoffsets[i],Aoffsets[i+1]):
+        print key2title[Alinks[off]]
+
+def links(key):
+    """Return geenrator for all links from this page"""
+    try:
+        i=key2id[key]
+        for off in xrange(Aoffsets[i],Aoffsets[i+1]):
+            yield Alinks[off]
+    except KeyError,IndexError:
+        pass
+            
+from heapq import *
+from collections import deque
+import sys
+sys.setrecursionlimit(10**5)
+def shortest_path(src_key):
+    # Breadth first search to find shortest path
+    print 'Find largest link'
+    cost=array('H')
+    prev=array('i')
+    M=max(Akeys)
+    print 'Prepare array of distances'
+    cost.extend([0]*(M+1))
+    prev.extend([0]*(M+1))
+    print 'Searching'
+    H=deque()
+    H.append(src_key)
+    while len(H):
+        key=H.popleft()
+        d=cost[key]+1
+        for k in links(key):
+            try:
+                if cost[k]: continue
+                cost[k]=d
+                prev[k]=key
+                H.append(k)
+            except IndexError:
+                pass
+    cost[src_key]=0
+    prev[src_key]=0
+    return cost,prev
+
+cost,prev=shortest_path(17275600)
+
+def print_path(key):
+    while key:
+        print key2title[key]
+        key=prev[key]
+        
+print_path(559997)
+    
